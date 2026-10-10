@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>frm 表单生成器</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#fff; --fg:#1c1e21; --muted:#57606a;
+    --accent:#2f6feb; --border:#d0d7de; --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--bg); color:var(--fg); font-size:14px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
+                "PingFang SC","Microsoft YaHei",sans-serif;
+  }
+
+  /* ---------- 布局 ---------- */
+  .app{display:grid; grid-template-columns:1fr 1fr; height:100vh;}
+  .pane{display:flex; flex-direction:column; min-width:0; min-height:0;}
+  .designer{background:var(--panel); border-right:1px solid var(--border);}
+
+  .pane-head{
+    flex:none; display:flex; align-items:center; justify-content:space-between;
+    gap:12px; padding:14px 18px; border-bottom:1px solid var(--border);
+    background:var(--panel);
+  }
+  .pane-head h1{font-size:15px; font-weight:600; margin:0;}
+  .pane-head .hint{font-size:12px; color:var(--muted);}
+  .head-actions{display:flex; gap:8px;}
+
+  .pane-body{flex:1; overflow-y:auto; padding:18px;}
+
+  /* ---------- 代码面板 ---------- */
+  .code-pane{background:#0d1117;}
+  .code-pane .pane-head{background:#161b22; border-bottom-color:#30363d; color:#e6edf3;}
+  .code-pane .pane-head h1{color:#e6edf3;}
+  .code-wrap{flex:1; overflow:auto; padding:16px 18px;}
+  .code-wrap pre{
+    margin:0; white-space:pre-wrap; word-break:break-all;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    font-size:13px; line-height:1.7; color:#c9d1d9;
+  }
+  .code-foot{
+    flex:none; padding:8px 18px; border-top:1px solid #30363d;
+    color:#7d8590; font-size:12px;
+  }
+
+  /* ---------- 按钮 ---------- */
+  .btn{
+    font:inherit; font-size:13px; padding:6px 11px; border-radius:8px; cursor:pointer;
+    border:1px solid var(--border); background:#fff; color:var(--fg);
+    transition:background .12s, border-color .12s, transform .06s;
+  }
+  .btn:hover{background:#f3f4f6;}
+  .btn:active{transform:translateY(1px);}
+  .btn:disabled{opacity:.6; cursor:default;}
+  .btn.ghost{background:transparent; border-style:dashed; color:var(--muted);}
+  .btn.ghost:hover{background:#f3f4f6; color:var(--fg);}
+  .btn.sm{font-size:12px; padding:4px 9px;}
+
+  .code-pane .btn{background:#21262d; border-color:#30363d; color:#e6edf3;}
+  .code-pane .btn:hover{background:#30363d;}
+
+  /* ---------- 表单控件 ---------- */
+  input[type=text], textarea{
+    font:inherit; color:inherit; width:100%;
+    padding:6px 9px; border:1px solid var(--border); border-radius:8px;
+    background:#fff; transition:border-color .12s, box-shadow .12s;
+  }
+  input[type=text]:focus, textarea:focus{
+    outline:none; border-color:var(--accent);
+    box-shadow:0 0 0 3px rgba(47,111,235,.12);
+  }
+  textarea{resize:vertical; min-height:52px;}
+
+  /* ---------- 设计器内容 ---------- */
+  .group + .group{margin-top:24px;}
+  .group-title{
+    font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); margin-bottom:10px;
+  }
+  .field-row{display:flex; flex-direction:column; gap:5px; margin-bottom:10px;}
+  .field-row > label{font-size:12px; color:var(--muted);}
+
+  .add-bar{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
+
+  .list{display:flex; flex-direction:column; gap:10px;}
+
+  .card{
+    border:1px solid var(--border); border-radius:var(--radius);
+    background:#fff; padding:10px;
+    transition:border-color .12s, box-shadow .12s;
+  }
+  .card:hover{border-color:#b9c0c8;}
+  .card:focus-within{
+    border-color:var(--accent);
+    box-shadow:0 0 0 3px rgba(47,111,235,.12);
+  }
+  .card-head{display:flex; align-items:center; gap:8px;}
+
+  .badge{
+    flex:none; font-size:11px; font-weight:600; padding:3px 7px;
+    border-radius:6px; background:#eef1f5; color:var(--muted);
+  }
+  .badge-text{background:#ddeaff; color:#1a56c4;}
+  .badge-int{background:#ece3ff; color:#6639ba;}
+  .badge-date{background:#fff1cc; color:#8a6100;}
+  .badge-select{background:#d8f5e0; color:#116b2e;}
+  .badge-separator{background:#eceef1; color:#57606a;}
+
+  .label-input{flex:1; min-width:0;}
+  .sep-line{flex:1; height:1px; border-top:1px dashed var(--border);}
+
+  .card-actions{flex:none; display:flex; gap:2px;}
+  .icon-btn{
+    width:26px; height:26px; flex:none; display:inline-flex; align-items:center;
+    justify-content:center; font-size:13px; line-height:1; cursor:pointer;
+    border:1px solid transparent; border-radius:6px; background:transparent;
+    color:var(--muted); transition:background .12s, color .12s;
+  }
+  .icon-btn:hover{background:#eef1f5; color:var(--fg);}
+
+  .card-body{margin-top:8px; padding-left:4px;}
+  .options{display:flex; flex-direction:column; gap:6px; margin-bottom:8px;}
+  .option-row{display:flex; align-items:center; gap:7px;}
+  .option-row .dot{
+    flex:none; width:6px; height:6px; border-radius:50%; background:#b9c0c8;
+  }
+  .option-row input{flex:1; min-width:0; font-size:13px; padding:5px 8px;}
+
+  .empty{
+    padding:26px; text-align:center; font-size:13px; color:var(--muted);
+    border:1px dashed var(--border); border-radius:10px;
+  }
+
+  /* ---------- 窄屏 ---------- */
+  @media (max-width:860px){
+    .app{display:flex; flex-direction:column; height:auto; min-height:100vh;}
+    .pane{flex:none;}
+    .designer{border-right:0; border-bottom:1px solid var(--border);}
+    .pane-body,.code-wrap{overflow:visible;}
+    .code-pane{min-height:340px;}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ 左：设计器 ============ -->
+  <section class="pane designer">
+    <header class="pane-head">
+      <h1>设计器</h1>
+      <div class="hint">添加 / 编辑 / 排序表单域</div>
+    </header>
+
+    <div class="pane-body">
+      <div class="group">
+        <div class="group-title">标题</div>
+        <div class="field-row">
+          <label for="mainTitle">主标题</label>
+          <input id="mainTitle" type="text" value="Interview" placeholder="问卷主标题">
+        </div>
+        <div class="field-row">
+          <label for="subtitles">副标题（每行一个，可留空）</label>
+          <textarea id="subtitles" rows="2" placeholder="第二行标题&#10;第三行标题"></textarea>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-title">表单域</div>
+        <div class="add-bar">
+          <button class="btn" type="button" data-add="text">+ 文本</button>
+          <button class="btn" type="button" data-add="int">+ 数字</button>
+          <button class="btn" type="button" data-add="date">+ 日期</button>
+          <button class="btn" type="button" data-add="select">+ 下拉</button>
+          <button class="btn" type="button" data-add="separator">+ 分隔线</button>
+        </div>
+        <div id="list" class="list"></div>
+        <div id="empty" class="empty">还没有表单域，点击上面的按钮添加。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 右：代码 ============ -->
+  <section class="pane code-pane">
+    <header class="pane-head">
+      <h1>代码</h1>
+      <div class="head-actions">
+        <button class="btn" type="button" id="copyBtn">复制</button>
+        <button class="btn" type="button" id="downloadBtn">下载 .frm</button>
+      </div>
+    </header>
+    <div class="code-wrap"><pre id="code"></pre></div>
+    <footer class="code-foot"><span id="stat"></span></footer>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------ *
+   * 常量 & 状态
+   * ------------------------------------------------------------------ */
+  var TYPE_LABEL = {
+    text: '文本', int: '数字', date: '日期',
+    select: '下拉', separator: '分隔线'
+  };
+  var DEFAULT_LABEL = {
+    text: '输入文本', int: '输入数字', date: '选择日期',
+    select: '选择一项', separator: ''
+  };
+
+  var uid = 0;
+  var state = { mainTitle: 'Interview', subtitles: [], fields: [] };
+
+  var listEl      = document.getElementById('list');
+  var emptyEl     = document.getElementById('empty');
+  var codeEl      = document.getElementById('code');
+  var statEl      = document.getElementById('stat');
+  var mainTitleEl = document.getElementById('mainTitle');
+  var subtitlesEl = document.getElementById('subtitles');
+
+  /* ------------------------------------------------------------------ *
+   * 代码生成
+   * ------------------------------------------------------------------ */
+  function q(s) {
+    return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  }
+
+  function generate() {
+    var lines = [];
+    lines.push('# Generated by frm builder');
+    lines.push('title ' + q(state.mainTitle));
+
+    state.subtitles.forEach(function (t) {
+      lines.push('title ' + q(t));
+    });
+
+    state.fields.forEach(function (f) {
+      if (f.type === 'separator') {
+        lines.push('---');
+        return;
+      }
+      if (f.type === 'select') {
+        lines.push('text ' + q(f.label));
+        f.options.forEach(function (o) {
+          lines.push('- ' + q(o));
+        });
+      } else {
+        lines.push(f.type + ' ' + q(f.label));
+      }
+    });
+
+    return lines.join('\n') + '\n';
+  }
+
+  function sync() {
+    var code = generate();
+    codeEl.textContent = code;
+    statEl.textContent = code.replace(/\n$/, '').split('\n').length + ' 行';
+    emptyEl.style.display = state.fields.length ? 'none' : '';
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 小工具
+   * ------------------------------------------------------------------ */
+  function iconBtn(text, title, onClick) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'icon-btn';
+    b.textContent = text;
+    b.title = title;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 卡片构建
+   * ------------------------------------------------------------------ */
+  function buildCard(f) {
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.id = f.id;
+
+    /* --- 头部 --- */
+    var head = document.createElement('div');
+    head.className = 'card-head';
+
+    var badge = document.createElement('span');
+    badge.className = 'badge badge-' + f.type;
+    badge.textContent = TYPE_LABEL[f.type];
+    head.appendChild(badge);
+
+    if (f.type === 'separator') {
+      var line = document.createElement('div');
+      line.className = 'sep-line';
+      head.appendChild(line);
+    } else {
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'label-input';
+      input.value = f.label;
+      input.placeholder = '标签文本';
+      input.addEventListener('input', function () {
+        f.label = input.value;
+        sync();
+      });
+      head.appendChild(input);
+    }
+
+    var actions = document.createElement('div');
+    actions.className = 'card-actions';
+    actions.appendChild(iconBtn('↑', '上移', function () { moveCard(f.id, -1); }));
+    actions.appendChild(iconBtn('↓', '下移', function () { moveCard(f.id,  1); }));
+    actions.appendChild(iconBtn('✕', '删除', function () { removeCard(f.id); }));
+    head.appendChild(actions);
+
+    card.appendChild(head);
+
+    /* --- 下拉选项 --- */
+    if (f.type === 'select') {
+      var body = document.createElement('div');
+      body.className = 'card-body';
+
+      var wrap = document.createElement('div');
+      wrap.className = 'options';
+      renderOptions(f, wrap);
+      body.appendChild(wrap);
+
+      var addOpt = document.createElement('button');
+      addOpt.type = 'button';
+      addOpt.className = 'btn ghost sm';
+      addOpt.textContent = '+ 添加选项';
+      addOpt.addEventListener('click', function () {
+        f.options.push('选项 ' + (f.options.length + 1));
+        renderOptions(f, wrap);
+        sync();
+        var inputs = wrap.querySelectorAll('input');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+      body.appendChild(addOpt);
+
+      card.appendChild(body);
+    }
+
+    return card;
+  }
+
+  function renderOptions(f, wrap) {
+    wrap.innerHTML = '';
+    f.options.forEach(function (opt, i) {
+      var row = document.createElement('div');
+      row.className = 'option-row';
+
+      var dot = document.createElement('span');
+      dot.className = 'dot';
+
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.value = opt;
+      input.placeholder = '选项文本';
+      input.addEventListener('input', function () {
+        f.options[i] = input.value;
+        sync();
+      });
+
+      var del = iconBtn('✕', '删除选项', function () {
+        f.options.splice(i, 1);
+        renderOptions(f, wrap);
+        sync();
+      });
+
+      row.appendChild(dot);
+      row.appendChild(input);
+      row.appendChild(del);
+      wrap.appendChild(row);
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 增 / 删 / 移动
+   * ------------------------------------------------------------------ */
+  function addField(type) {
+    var f = {
+      id: ++uid,
+      type: type,
+      label: DEFAULT_LABEL[type] || '',
+      options: type === 'select' ? ['选项一', '选项二'] : []
+    };
+    state.fields.push(f);
+
+    var card = buildCard(f);
+    listEl.appendChild(card);
+    sync();
+
+    var input = card.querySelector('.label-input');
+    if (input) { input.focus(); input.select(); }
+  }
+
+  function removeCard(id) {
+    var i = state.fields.findIndex(function (f) { return f.id === id; });
+    if (i < 0) return;
+    state.fields.splice(i, 1);
+
+    var node = listEl.querySelector('[data-id="' + id + '"]');
+    if (node) node.remove();
+    sync();
+  }
+
+  function moveCard(id, dir) {
+    var i = state.fields.findIndex(function (f) { return f.id === id; });
+    var j = i + dir;
+    if (i < 0 || j < 0 || j >= state.fields.length) return;
+
+    var tmp = state.fields[i];
+    state.fields[i] = state.fields[j];
+    state.fields[j] = tmp;
+
+    var a = listEl.children[i];
+    var b = listEl.children[j];
+    if (dir < 0) listEl.insertBefore(a, b);
+    else         listEl.insertBefore(b, a);
+
+    sync();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 事件绑定
+   * ------------------------------------------------------------------ */
+  document.querySelector('.add-bar').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-add]');
+    if (btn) addField(btn.dataset.add);
+  });
+
+  mainTitleEl.addEventListener('input', function () {
+    state.mainTitle = mainTitleEl.value;
+    sync();
+  });
+
+  subtitlesEl.addEventListener('input', function () {
+    state.subtitles = subtitlesEl.value
+      .split('\n')
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    sync();
+  });
+
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var btn = this;
+    var text = codeEl.textContent;
+
+    function done() {
+      var old = btn.textContent;
+      btn.textContent = '已复制';
+      btn.disabled = true;
+      setTimeout(function () {
+        btn.textContent = old;
+        btn.disabled = false;
+      }, 1200);
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
+
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      ta.remove();
+      done();
+    }
+  });
+
+  document.getElementById('downloadBtn').addEventListener('click', function () {
+    var name = (state.mainTitle.trim().replace(/[^\w\u4e00-\u9fa5-]+/g, '_') || 'form');
+    var blob = new Blob([codeEl.textContent], { type: 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name + '.frm';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  /* ------------------------------------------------------------------ *
+   * 初始示例（与 example.frm 一致）
+   * ------------------------------------------------------------------ */
+  (function seed() {
+    var seeds = [
+      { type: 'text',      label: 'Input a text',   options: [] },
+      { type: 'select',    label: 'Select',         options: ['Something', 'Sth else'] },
+      { type: 'int',       label: 'Input a number', options: [] },
+      { type: 'date',      label: 'choose a day',   options: [] },
+      { type: 'separator', label: '',               options: [] }
+    ];
+
+    seeds.forEach(function (s) {
+      var f = {
+        id: ++uid,
+        type: s.type,
+        label: s.label,
+        options: s.options.slice()
+      };
+      state.fields.push(f);
+      listEl.appendChild(buildCard(f));
+    });
+
+    sync();
+  })();
+
+})();
+</script>
+</body>
+</html>
