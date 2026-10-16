@@ -6,7 +6,7 @@ handitin.py — 命令行 HTML 问卷工具
 用法:
     handitin.py build   <file.frm>          在当前目录生成离线 HTML 表单
     handitin.py serve   <file.frm>          启动局域网表单服务并监听结果
-    handitin.py collect                     从 stdin 收集 base64 结果，Ctrl-C 结束并写入 csv
+    handitin.py collect <file.frm>          从 stdin 收集 base64 结果，校验类型后写入 csv
 """
 
 from __future__ import annotations
@@ -30,9 +30,10 @@ from urllib.parse import urlparse
 
 @dataclass
 class Field:
-    kind: str                       # text | select | int | date | separator
+    kind: str                       # text | select | int | date | chkbox | separator
     label: str = ""
     options: list = dc_field(default_factory=list)
+    required: bool = False
 
 
 def strip_comment(line: str) -> str:
@@ -101,14 +102,25 @@ def parse_frm(text: str):
         head = tokens[0]
         value = tokens[1] if len(tokens) > 1 else ""
 
+        # 必填标记: 指令或标签以 * 开头
+        required = False
+        if head.startswith("*"):
+            required = True
+            head = head[1:]
+        if value.startswith("*"):
+            required = True
+            value = value[1:]
+
         if head == "title":
             titles.append(value)
         elif head == "text":
-            fields.append(Field("text", value))
+            fields.append(Field("text", value, required=required))
         elif head == "int":
-            fields.append(Field("int", value))
+            fields.append(Field("int", value, required=required))
         elif head == "date":
-            fields.append(Field("date", value))
+            fields.append(Field("date", value, required=required))
+        elif head == "chkbox":
+            fields.append(Field("chkbox", value, required=required))
         elif head == "---":
             fields.append(Field("separator"))
         elif head == "-":
@@ -198,7 +210,9 @@ button:hover { filter: brightness(1.06); }
   margin: 0;
   font-size: .85rem;
 }
+.req { color: var(--muted); font-weight: 400; }
 .hint { font-size: .85rem; color: var(--muted); margin: .5rem 0 0; }
+__EXTRA_CSS__
 </style>
 </head>
 <body>
@@ -256,7 +270,9 @@ form.addEventListener('submit', function (ev) {
     var el = document.getElementById(f.id);
     var v  = el ? el.value : '';
 
-    if (f.type === 'date' && v) {
+    if (f.type === 'chkbox') {
+      v = el && el.checked ? '1' : '0';
+    } else if (f.type === 'date' && v) {
       // 日期 -> UNIX 时间戳（秒）
       var t = Date.parse(v + 'T00:00:00Z');
       v = isNaN(t) ? '' : String(Math.floor(t / 1000));
@@ -290,7 +306,7 @@ form.addEventListener('submit', function (ev) {
 """
 
 
-def render_html(titles, fields, endpoint=None) -> str:
+def render_html(titles, fields, endpoint=None, extra_css="") -> str:
     main_title = titles[0] if titles else "Questionnaire"
     subtitles = "\n".join(
         f'<h2>{html.escape(t)}</h2>' for t in titles[1:]
@@ -303,7 +319,7 @@ def render_html(titles, fields, endpoint=None) -> str:
             continue
 
         fid = f"f{i}"
-        meta.append({"id": fid, "type": f.kind})
+        meta.append({"id": fid, "type": f.kind, "required": f.required})
         label = html.escape(f.label)
 
         if f.kind == "select":
@@ -311,16 +327,24 @@ def render_html(titles, fields, endpoint=None) -> str:
             for o in f.options:
                 eo = html.escape(o, quote=True)
                 opts.append(f'<option value="{eo}">{eo}</option>')
-            control = f'<select id="{fid}" name="{fid}">' + "".join(opts) + "</select>"
+            req = " required" if f.required else ""
+            control = f'<select id="{fid}" name="{fid}"{req}>' + "".join(opts) + "</select>"
         elif f.kind == "int":
-            control = f'<input type="number" step="1" id="{fid}" name="{fid}">'
+            req = " required" if f.required else ""
+            control = f'<input type="number" step="1" id="{fid}" name="{fid}"{req}>'
         elif f.kind == "date":
-            control = f'<input type="date" id="{fid}" name="{fid}">'
+            req = " required" if f.required else ""
+            control = f'<input type="date" id="{fid}" name="{fid}"{req}>'
+        elif f.kind == "chkbox":
+            req = " required" if f.required else ""
+            control = f'<input type="checkbox" id="{fid}" name="{fid}" value="1"{req}>'
         else:
-            control = f'<input type="text" id="{fid}" name="{fid}">'
+            req = " required" if f.required else ""
+            control = f'<input type="text" id="{fid}" name="{fid}"{req}>'
 
+        req_mark = ' <span class="req">*</span>' if f.required else ""
         parts.append(
-            f'  <div class="field"><label for="{fid}">{label}</label>{control}</div>'
+            f'  <div class="field"><label for="{fid}">{req_mark}{label}</label>{control}</div>'
         )
 
     script = (JS_TEMPLATE
@@ -331,7 +355,8 @@ def render_html(titles, fields, endpoint=None) -> str:
             .replace("__TITLE__", html.escape(main_title))
             .replace("__SUBTITLES__", subtitles)
             .replace("__FIELDS__", "\n".join(parts))
-            .replace("__SCRIPT__", script))
+            .replace("__SCRIPT__", script)
+            .replace("__EXTRA_CSS__", ""))
 
 
 # --------------------------------------------------------------------------- #
@@ -351,7 +376,13 @@ def _base_name(filename: str) -> str:
 
 def cmd_build(args):
     titles, fields = _load(args.filename)
-    page = render_html(titles, fields, endpoint=None)
+    extra_css = ""
+    if args.style:
+        css_path = Path(args.style)
+        if not css_path.is_file():
+            sys.exit(f"handitin: 找不到样式文件: {css_path}")
+        extra_css = css_path.read_text(encoding="utf-8")
+    page = render_html(titles, fields, endpoint=None, extra_css=extra_css)
     out = Path.cwd() / (_base_name(args.filename) + ".html")
     out.write_text(page, encoding="utf-8")
     print(f"已生成: {out}")
@@ -375,7 +406,11 @@ def cmd_serve(args):
     page = render_html(titles, fields, endpoint="/submit").encode("utf-8")
 
     out_path = Path(args.output).expanduser().resolve()
-    out_path.touch(exist_ok=True)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    headers = [f.label for f in fields if f.kind != "separator"]
+    if not out_path.exists() or out_path.stat().st_size == 0:
+        with out_path.open("w", encoding="utf-8", newline="") as fh:
+            csv.writer(fh).writerow(headers)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "handitin/1.0"
@@ -414,10 +449,22 @@ def cmd_serve(args):
             except Exception:
                 line = raw
 
-            with out_path.open("a", encoding="utf-8", newline="") as fh:
-                fh.write(line.rstrip("\r\n") + "\n")
+            try:
+                values = next(csv.reader([line]))
+            except Exception:
+                values = [line]
+            cleaned, warnings = _validate_row(fields, values)
+            for w in warnings:
+                sys.stdout.write("[!] " + w + "\n")
+            import io
+            buf = io.StringIO()
+            csv.writer(buf).writerow(cleaned)
+            clean_line = buf.getvalue().strip("\r\n")
 
-            sys.stdout.write("[+] " + line + "\n")
+            with out_path.open("a", encoding="utf-8", newline="") as fh:
+                fh.write(clean_line + "\n")
+
+            sys.stdout.write("[+] " + clean_line + "\n")
             sys.stdout.flush()
             self._reply(200, "ok")
 
@@ -438,9 +485,48 @@ def cmd_serve(args):
         httpd.server_close()
 
 
+def _validate_row(fields, values):
+    """Validate a row of values against field types. Returns (cleaned_values, warnings)."""
+    warnings = []
+    cleaned = []
+    for i, f in enumerate(fields):
+        if f.kind == "separator":
+            continue
+        v = values[i] if i < len(values) else ""
+        if f.kind == "int":
+            try:
+                v = str(int(v))
+            except (ValueError, TypeError):
+                warnings.append(f"字段 '{f.label}' 期望整数，得到 '{v}'，已保留原值")
+        elif f.kind == "date":
+            if v and not v.isdigit():
+                warnings.append(f"字段 '{f.label}' 期望日期时间戳，得到 '{v}'，已保留原值")
+        elif f.kind == "select":
+            if v and f.options and v not in f.options:
+                warnings.append(f"字段 '{f.label}' 的值 '{v}' 不在选项列表中")
+        elif f.kind == "chkbox":
+            if v not in ("0", "1"):
+                warnings.append(f"字段 '{f.label}' 期望 0 或 1，得到 '{v}'，已设为 0")
+                v = "0"
+        # 必填验证
+        if f.required:
+            if f.kind in ("text", "select") and not v:
+                warnings.append(f"字段 '{f.label}' 为必填项，但值为空")
+            elif f.kind == "chkbox" and v != "1":
+                warnings.append(f"字段 '{f.label}' 为必填项，必须勾选")
+            elif f.kind == "int" and v in ("", "0"):
+                warnings.append(f"字段 '{f.label}' 为必填项，需要非零值")
+        cleaned.append(v)
+    return cleaned, warnings
+
+
 def cmd_collect(args):
+    titles, fields = _load(args.filename)
     out_path = Path(args.output).expanduser().resolve()
     rows = []
+
+    # Build header from field labels (skip separators)
+    headers = [f.label for f in fields if f.kind != "separator"]
 
     sys.stderr.write("从 stdin 读取结果（粘贴 base64 行，Ctrl-C 结束）...\n")
     sys.stderr.flush()
@@ -467,13 +553,22 @@ def cmd_collect(args):
         sys.stderr.write("没有收集到任何结果。\n")
         return
 
-    with out_path.open("w", encoding="utf-8", newline="") as fh:
+    # Check if file exists to determine if we need headers
+    write_header = not out_path.exists() or out_path.stat().st_size == 0
+
+    with out_path.open("a", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
+        if write_header:
+            writer.writerow(headers)
         for r in rows:
             try:
-                writer.writerow(next(csv.reader([r])))
+                values = next(csv.reader([r]))
             except Exception:
-                writer.writerow([r])
+                values = [r]
+            cleaned, warnings = _validate_row(fields, values)
+            for w in warnings:
+                sys.stderr.write(f"  警告: {w}\n")
+            writer.writerow(cleaned)
 
     print(f"已写入 {len(rows)} 行到 {out_path}")
 
@@ -489,6 +584,7 @@ def main(argv=None):
 
     p_build = sub.add_parser("build", help="根据 .frm 生成离线 HTML 表单")
     p_build.add_argument("filename")
+    p_build.add_argument("-s", "--style", help="自定义 CSS 文件，覆盖默认样式")
     p_build.set_defaults(func=cmd_build)
 
     p_serve = sub.add_parser("serve", help="启动局域网表单服务并监听结果")
@@ -498,7 +594,8 @@ def main(argv=None):
     p_serve.add_argument("-o", "--output", default="results.csv")
     p_serve.set_defaults(func=cmd_serve)
 
-    p_collect = sub.add_parser("collect", help="从 stdin 收集结果并写入 csv")
+    p_collect = sub.add_parser("collect", help="从 stdin 收集 base64 结果，校验类型后写入 csv")
+    p_collect.add_argument("filename")
     p_collect.add_argument("-o", "--output", default="results.csv")
     p_collect.set_defaults(func=cmd_collect)
 

@@ -14,7 +14,7 @@ No build step, no package install, no tests. Python 3 standard library only.
 
 - `main.py` — single-file CLI. Subcommands: `build`, `serve`, `collect`. Entry point is `main()` at the bottom.
 - `generator.html` — standalone browser form designer. Outputs `.frm` text. No server, no build.
-- `.frm` format — line-based text: `title`, `text`, `int`, `date`, `-` (select options), `---` (separator). Supports `#` comments and quoted strings with escapes.
+- `.frm` format — line-based text: `title`, `text`, `int`, `date`, `chkbox`, `-` (select options), `---` (separator). Supports `#` comments, quoted strings with escapes, and `*` prefix for required fields.
 
 ## Conventions
 
